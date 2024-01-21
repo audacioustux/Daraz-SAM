@@ -1,0 +1,4 @@
+requests
+boto3
+aws-lambda-powertools[tracer]
+aws-xray-sdk

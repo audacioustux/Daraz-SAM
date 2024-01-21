@@ -1,0 +1,42 @@
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  EnvKind:
+    Type: String
+    AllowedValues: [dev, test, prod]
+
+Mappings:
+  EnvMap:
+    prod:
+      LogLevel: WARN
+      DarazSsmParametersPath: /integrations/daraz
+      DarazRefreshTokensSchedule: rate(1 day)
+      DarazSyncOrdersSchedule: rate(30 minutes)
+    test:
+      LogLevel: INFO
+      DarazSsmParametersPath: /test/integrations/daraz
+      DarazRefreshTokensSchedule: rate(1 day)
+      DarazSyncOrdersSchedule: rate(30 minutes)
+    dev:
+      LogLevel: DEBUG
+      DarazSsmParametersPath: /dev/integrations/daraz
+      DarazRefreshTokensSchedule: rate(1 minute)
+      DarazSyncOrdersSchedule: rate(1 minute)
+
+Resources:
+  DarazStack:
+    Type: AWS::Serverless::Application
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      Location: daraz/template.yaml
+      Parameters:
+        LogLevel: !FindInMap [EnvMap, !Ref EnvKind, LogLevel]
+        SsmParametersPath:
+          !FindInMap [EnvMap, !Ref EnvKind, DarazSsmParametersPath]
+        RefreshTokensSchedule:
+          !FindInMap [EnvMap, !Ref EnvKind, DarazRefreshTokensSchedule]
+        SyncOrdersSchedule:
+          !FindInMap [EnvMap, !Ref EnvKind, DarazSyncOrdersSchedule]
+        AppKey: /integrations/daraz/app/key
+        AppSecret: /integrations/daraz/app/secret

@@ -1,0 +1,137 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Platform Integrations / Daraz
+
+Parameters:
+  LogLevel:
+    Description: Log level for the application
+    Type: String
+    Default: "INFO"
+    AllowedValues:
+      - DEBUG
+      - INFO
+      - WARN
+  SsmParametersPath:
+    Type: String
+    Description: AWS SSM Parameter Store path
+  RefreshTokensSchedule:
+    Type: String
+    Description: Schedule for Daraz refresh tokens function
+  SyncOrdersSchedule:
+    Type: String
+    Description: Schedule for Daraz sync orders function
+  AppKey:
+    Type: AWS::SSM::Parameter::Value<String>
+    Description: Daraz API app key
+  AppSecret:
+    # TODO: Should be a SecureString but SAM doesn't support it yet
+    Type: AWS::SSM::Parameter::Value<String>
+    Description: Daraz API app secret
+
+Globals: # https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-specification-template-anatomy-globals.html
+  Function:
+    Timeout: 5
+    MemorySize: 128
+    Runtime: python3.12
+    Architectures:
+      - x86_64
+    Tracing: Active
+    # You can add LoggingConfig parameters such as the Logformat, Log Group, and SystemLogLevel or ApplicationLogLevel. Learn more here https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-resource-function.html#sam-function-loggingconfig.
+    LoggingConfig:
+      LogFormat: JSON
+    Environment:
+      Variables:
+        AWS_LAMBDA_LOG_LEVEL: !Ref LogLevel
+        SSM_PARAMETERS_PATH: !Ref SsmParametersPath
+        APP_KEY: !Ref AppKey
+        APP_SECRET: !Ref AppSecret
+        POWERTOOLS_METRICS_NAMESPACE: Daraz
+    Tags:
+      LambdaPowertools: python
+  Api:
+    TracingEnabled: true
+
+Resources:
+  DarazApiFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-resource-function.html
+    Properties:
+      Handler: api.lambda_handler
+      CodeUri: lambdas/
+      Description: API Gateway endpoint for Daraz integration
+      Events:
+        HelloPath:
+          Type: Api # More info about API Event Source: https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-property-function-api.html
+          Properties:
+            Path: /daraz/{proxy+} # Send requests on any path to the lambda function
+            Method: ANY
+      # Powertools env vars: https://awslabs.github.io/aws-lambda-powertools-python/#environment-variables
+      Environment:
+        Variables:
+          POWERTOOLS_SERVICE_NAME: Api
+      Policies: &DarazSsmParametersPolicy
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - ssm:*
+              Resource:
+                - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmParametersPath}*"
+
+  DarazSyncOrdersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: sync_orders.lambda_handler
+      CodeUri: lambdas/
+      Description: Polls Daraz API for new orders and syncs them to the platform
+      Timeout: 300
+      Events:
+        DarazPollSyncSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: !Ref SyncOrdersSchedule
+      Environment:
+        Variables:
+          POWERTOOLS_SERVICE_NAME: SyncOrders
+      Policies: *DarazSsmParametersPolicy
+
+  DarazRefreshTokensFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: refresh_tokens.lambda_handler
+      CodeUri: lambdas/
+      Description: Refreshes Daraz API auth tokens
+      Events:
+        DarazRefreshAuthTokensSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: !Ref RefreshTokensSchedule
+      Environment:
+        Variables:
+          POWERTOOLS_SERVICE_NAME: RefreshTokens
+      Policies: *DarazSsmParametersPolicy
+
+  ApplicationResourceGroup:
+    Type: AWS::ResourceGroups::Group
+    Properties:
+      Name: !Sub "ApplicationInsights-SAM-${AWS::StackName}"
+      ResourceQuery:
+        Type: CLOUDFORMATION_STACK_1_0
+  ApplicationInsightsMonitoring:
+    Type: AWS::ApplicationInsights::Application
+    Properties:
+      ResourceGroupName: !Ref ApplicationResourceGroup
+      AutoConfigurationEnabled: true
+
+Outputs:
+  DarazApiFunction:
+    Description: Daraz API Lambda Function ARN
+    Value: !GetAtt DarazApiFunction.Arn
+
+  DarazSyncOrdersFunction:
+    Description: Daraz Sync Orders Lambda Function ARN
+    Value: !GetAtt DarazSyncOrdersFunction.Arn
+
+  DarazRefreshTokensFunction:
+    Description: Daraz Refresh Tokens Lambda Function ARN
+    Value: !GetAtt DarazRefreshTokensFunction.Arn

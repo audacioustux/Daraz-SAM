@@ -1,0 +1,29 @@
+version: "3"
+
+tasks:
+  default: task --list-all
+  ecr:login: >-
+    aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws
+  sam:validate: sam validate --lint
+  sam:codepipeline:deploy:
+    deps: [sam:validate]
+    cmd: >-
+      sam deploy --stack-name platform-integrations 
+      -t codepipeline.yaml 
+      --region us-west-2 
+      --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND
+  dev:watch:
+    deps: [sam:validate]
+    cmds:
+      - >-
+        sam sync --watch 
+        --stack-name platform-integrations-dev 
+        --parameter-overrides EnvKind=dev
+      - >-
+        sam delete --stack-name platform-integrations-dev --no-prompts
+  dev:watch:logs: >-
+    sam logs --stack-name platform-integrations-dev --tail
+  local:start-api:
+    cmds:
+      - sam build
+      - sam local start-api
